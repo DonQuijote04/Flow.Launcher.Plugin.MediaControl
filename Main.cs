@@ -37,6 +37,9 @@ namespace Flow.Launcher.Plugin.MediaControl
         private static string _lastRawQuery = ""; // 记录最后一次输入框里的确切文本
         private static bool _wasVisible = false;  // 状态机：记录上一次判定时窗口是否可见
         private static uint _currentPid;
+        
+        // 【新增】底层状态快照记录，用于彻底解决无限刷新死循环
+        private static string _lastStateHash = "";
 
         // 黑名单
         private static readonly HashSet<string> _blacklist = new(StringComparer.OrdinalIgnoreCase)
@@ -211,79 +214,68 @@ namespace Flow.Launcher.Plugin.MediaControl
                             _wasVisible = true;
                             if (!string.IsNullOrEmpty(_lastRawQuery) && _lastRawQuery.StartsWith(_currentActionKeyword, StringComparison.OrdinalIgnoreCase))
                             {
+                                _lastStateHash = GetCurrentStateHash(); // 同步状态，防止紧接着误触发
                                 _context.API.ChangeQuery(_lastRawQuery, true);
                                 continue;
                             }
                         }
 
-                        // ================= 3. 停留在界面时的“静默热更新” =================
+                        // ================= 3. 停留在界面时的“状态比对触发刷新” (彻底防死循环版) =================
                         if (_cachedResults.Count > 0)
                         {
-                            using var device = _audioEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                            foreach (var res in _cachedResults)
+                            string currentStateHash = GetCurrentStateHash();
+                            
+                            if (!string.IsNullOrEmpty(_lastStateHash) && currentStateHash != _lastStateHash)
                             {
-                                // 热更新：播放/暂停 按钮状态
-                                if (res.Title == "暂停" || res.Title == "播放")
+                                // 发现底层数据变化！立刻更新 Hash 记录，保证绝对只刷新这一次
+                                _lastStateHash = currentStateHash;
+                                
+                                if (!string.IsNullOrEmpty(_lastRawQuery) && _lastRawQuery.StartsWith(_currentActionKeyword, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    var cache = GetTargetCache(_currentTargetApp);
-                                    bool isPlaying = cache?.IsPlaying ?? false;
-
-                                    if (_lastToggleTime.TryGetValue(_currentTargetApp, out DateTime lastTime) &&
-                                        (DateTime.Now - lastTime).TotalMilliseconds < 2000 &&
-                                        _localPlayState.TryGetValue(_currentTargetApp, out bool cachedState))
-                                    {
-                                        isPlaying = cachedState;
-                                    }
-
-                                    string targetTitle = isPlaying ? "暂停" : "播放";
-                                    string targetIco = isPlaying ? "Images\\pause.png" : "Images\\play.png";
-                                    
-                                    if (res.Title != targetTitle) res.Title = targetTitle;
-                                    if (res.IcoPath != targetIco) res.IcoPath = targetIco;
+                                    _context.API.ChangeQuery(_lastRawQuery, true);
                                 }
-                                // 热更新：主音量界面
-                                else if (res.Title != null && res.Title.StartsWith("总音量:"))
-                                {
-                                    int masterVol = (int)Math.Round(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
-                                    string targetTitle = $"总音量: {masterVol}%";
-                                    string targetIco = device.AudioEndpointVolume.Mute ? "Images\\mute.png" : "Images\\app.png";
-                                    
-                                    if (res.Title != targetTitle) res.Title = targetTitle;
-                                    if (res.IcoPath != targetIco) res.IcoPath = targetIco;
-                                }
-                                // 热更新：主菜单里的各个 App 音量与播放状态
-                                else if (res.SubTitle != null && res.SubTitle.StartsWith("[") && res.SubTitle.Contains("] "))
-                                {
-                                    int endBracket = res.SubTitle.IndexOf(']');
-                                    if (endBracket > 1)
-                                    {
-                                        string realAppName = res.SubTitle.Substring(1, endBracket - 1);
-                                        var cache = GetTargetCache(realAppName);
-                                        var proc = GetProcessSafe(realAppName);
-                                        
-                                        if (cache == null && proc == null)
-                                        {
-                                            string deadSub = $"[{realAppName}] ⏸ 已结束";
-                                            if (res.SubTitle != deadSub) res.SubTitle = deadSub;
-                                        }
-                                        else
-                                        {
-                                            int vol = 100;
-                                            var audioSession = FindSession(realAppName, device);
-                                            if (audioSession != null) vol = (int)Math.Round(audioSession.SimpleAudioVolume.Volume * 100);
-                                            
-                                            bool isPlaying = cache?.IsPlaying ?? false;
-                                            string tSub = $"[{realAppName}] {(isPlaying ? "▶ 播放中" : "⏸ 已暂停")} | 音量: {vol}%";
-                                            if (res.SubTitle != tSub) res.SubTitle = tSub;
-                                        }
-                                    }
-                                }
+                            }
+                            else if (string.IsNullOrEmpty(_lastStateHash))
+                            {
+                                _lastStateHash = currentStateHash; // 初始赋值
                             }
                         }
                     }
                     catch { }
                 }
             });
+        }
+
+        // ================= 获取系统真实状态快照 (极速轻量) =================
+        // 这个方法会把当前所有的音频状态拼接成一个字符串。任何一处变化，都会产生不同的字符串，从而触发上面的一次刷新。
+        private string GetCurrentStateHash()
+        {
+            var sb = new System.Text.StringBuilder();
+            try
+            {
+                using var device = _audioEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                int masterVol = (int)Math.Round(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
+                sb.Append($"M:{masterVol}:{device.AudioEndpointVolume.Mute}");
+
+                var validSessions = _sessionCache.Values.Where(c => c.IsValid).OrderBy(c => c.RealAppName).ToList();
+                foreach (var c in validSessions)
+                {
+                    sb.Append($"|S:{c.RealAppName}:{c.IsPlaying}:{c.Title}");
+                }
+
+                var audioSessions = device.AudioSessionManager.Sessions;
+                for (int i = 0; i < audioSessions.Count; i++)
+                {
+                    var s = audioSessions[i];
+                    if (s != null)
+                    {
+                        int v = (int)Math.Round(s.SimpleAudioVolume.Volume * 100);
+                        sb.Append($"|A:{s.GetProcessID}:{v}:{s.SimpleAudioVolume.Mute}");
+                    }
+                }
+            }
+            catch { }
+            return sb.ToString();
         }
 
         // 利用底层反射调用 UIAutomation 获取输入框文本 (防编译报错)
@@ -651,6 +643,8 @@ namespace Flow.Launcher.Plugin.MediaControl
                     catch { continue; }
                 }
 
+                // 更新状态 Hash 防止刚渲染完又触发背景线程瞎刷
+                _lastStateHash = GetCurrentStateHash();
                 return ReturnAndCache(results);
             }
 
@@ -678,6 +672,7 @@ namespace Flow.Launcher.Plugin.MediaControl
                         }
                     });
                 }
+                _lastStateHash = GetCurrentStateHash();
                 return ReturnAndCache(results);
             }
 
@@ -696,6 +691,7 @@ namespace Flow.Launcher.Plugin.MediaControl
                         return true; 
                     }
                 });
+                _lastStateHash = GetCurrentStateHash();
                 return ReturnAndCache(results); 
             }
 
@@ -736,16 +732,13 @@ namespace Flow.Launcher.Plugin.MediaControl
                     Score = 100000,
                     Action = c => 
                     {
-                        // 1. 本地立刻变动 UI，防呆显示
                         bool newState = !isPlayingFromSMTC;
                         _localPlayState[targetApp] = newState;
                         _lastToggleTime[targetApp] = DateTime.Now;
 
-                        // 立刻强刷一次
                         if (!string.IsNullOrEmpty(_lastRawQuery))
                             _context.API.ChangeQuery(_lastRawQuery, true);
 
-                        // 2. 后台异步执行真实命令，并在之后重置兜底
                         Task.Run(async () =>
                         {
                             if (targetSmtcSession != null)
@@ -755,10 +748,8 @@ namespace Flow.Launcher.Plugin.MediaControl
                             
                             await Task.Delay(400); // 给系统一点反应时间
 
-                            // 销毁预测记录，这样下一次 Query 必读系统底层真实状态
                             _lastToggleTime.TryRemove(targetApp, out _);
 
-                            // 最后兜底强刷一次。如果系统操作失败了，这里会自动拉回原始状态
                             if (!string.IsNullOrEmpty(_lastRawQuery))
                                 _context.API.ChangeQuery(_lastRawQuery, true);
                         });
@@ -822,6 +813,7 @@ namespace Flow.Launcher.Plugin.MediaControl
                 }
             }
 
+            _lastStateHash = GetCurrentStateHash(); // 同样在最后更新 Hash 以免误触
             return ReturnAndCache(results);
         }
 
@@ -922,7 +914,6 @@ namespace Flow.Launcher.Plugin.MediaControl
             
             if (appName == "master")
             {
-                // 使用 WM_APPCOMMAND 阶梯触发法
                 if (target > 0)
                 {
                     actionDevice.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Clamp((target - 2) / 100f, 0f, 1f);
