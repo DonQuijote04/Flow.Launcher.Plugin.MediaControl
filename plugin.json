@@ -1,12 +1,12 @@
 {
   "ID": "F9A8B7C6D5E432109876543210ABCDEF",
   "ActionKeyword": "mc",
-  "Name": "Powerful Media Control",
-  "Description": "一个媒体控制台",
+  "Name": "Media Control",
+  "Description": "一个媒体控制插件",
   "Author": "Master",
   "Version": "1.0.0",
   "Language": "csharp",
-  "Website": "",
+  "Website": "https://github.com/DonQuijote04/Flow.Launcher.Plugin.MediaControl",
   "IcoPath": "Images\\app.png",
   "ExecuteFileName": "Flow.Launcher.Plugin.MediaControl.dll"
 }
