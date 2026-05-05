@@ -1,8 +1,8 @@
 # Flow.Launcher.Plugin.MediaControl
 
-由于插件商店里面没有好用的媒体控制插件，我自己vibe coding出了一个。在我的Windows11上面运行没有问题。
+由于目前插件商店内没有很好用的媒体控制插件，我尝试 Vibe Coding 自己开发了一个。目前在我的 Windows 11 系统上运行良好，支持直接输入数字来调节音量。
 
-输入数字可以直接调节音量。
+Since there are no satisfactory media control plugins in the store, I vibe-coded one myself. It runs smoothly on my Windows 11 system and supports direct numerical input for volume adjustment.
 
 ## Credits / 致谢
 
