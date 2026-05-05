@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 建议升级到 net8.0 或更高，以获得更好的 WinRT 投影支持 -->
+    <!-- windows10.0.19041.0 是使用 SMTC API 的最低基准版本 -->
+    <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    
+    <!-- 必须开启预览版语言支持，否则无法识别代码中的 field 关键字 -->
+    <LangVersion>preview</LangVersion>
+    
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    
+    <!-- 确保插件的所有依赖库都被拷贝到输出目录，方便 Flow Launcher 加载 -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    
+    <!-- 针对 Master 系统的最新环境，可以忽略一些过时的包警告 -->
+    <NoWarn>$(NoWarn);NU1803;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Flow.Launcher.Plugin" Version="4.4.0" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- 必须引用这个包来增强 C# 对 Windows 运行时 (WinRT) 的互操作性 -->
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.1.1" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Images\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
