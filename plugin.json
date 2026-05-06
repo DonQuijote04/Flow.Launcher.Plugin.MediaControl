@@ -2,7 +2,7 @@
   "ID": "F9A8B7C6D5E432109876543210ABCDEF",
   "ActionKeyword": "mc",
   "Name": "Media Control",
-  "Description": "一个媒体控制插件",
+  "Description": "Powerful media control with numerical volume input. / 强大的媒体控制插件，支持输入数字调节音量。",
   "Author": "Major Major Major",
   "Version": "1.0.0",
   "Language": "csharp",
